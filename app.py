@@ -33,7 +33,10 @@ df = pd.read_csv(FILE_NAME)
 
 # Convert date column properly
 if not df.empty:
-    df["Date"] = pd.to_datetime(df["Date"])
+    # Safe Date Conversion
+if "Date" in df.columns:
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df = df.dropna(subset=["Date"])
 
 # -------------------------------------------------
 # SIDEBAR
