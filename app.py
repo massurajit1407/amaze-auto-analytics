@@ -32,11 +32,17 @@ if not os.path.exists(FILE_NAME):
 df = pd.read_csv(FILE_NAME)
 
 # Convert date column properly
-if not df.empty:
-    # Safe Date Conversion
-if "Date" in df.columns:
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"])
+uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+
+    # Convert Date column if present
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"])
+
+    st.success("File uploaded successfully!")
+    st.dataframe(df.head())
 
 # -------------------------------------------------
 # SIDEBAR
