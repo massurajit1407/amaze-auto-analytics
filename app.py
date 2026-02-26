@@ -193,6 +193,13 @@ elif menu == "Dashboard":
     if df.empty:
         st.warning("No data available.")
     else:
+
+        # Sort latest first
+        df_sorted = df.sort_values(by="Date", ascending=False)
+
+        # =====================
+        # COST SUMMARY
+        # =====================
         total_fuel = df["Fuel_Cost"].sum()
         total_service = df["Service_Cost"].sum()
         total_toll = df["State_Toll"].sum() + df["Private_Toll"].sum()
@@ -200,21 +207,44 @@ elif menu == "Dashboard":
 
         total_cost = total_fuel + total_service + total_toll + total_fastag
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Fuel ₹", round(total_fuel, 2))
         col2.metric("Total Service ₹", round(total_service, 2))
         col3.metric("Total Toll ₹", round(total_toll + total_fastag, 2))
+        col4.metric("Grand Total ₹", round(total_cost, 2))
 
+        st.divider()
+
+        # =====================
+        # MONTHLY SERVICE TREND
+        # =====================
         st.subheader("Monthly Service Trend")
 
-        service_df = df[df["Type"] == "Service"]
+        service_df = df[df["Type"] == "Service"].copy()
+
         if not service_df.empty:
             service_df["Month"] = service_df["Date"].dt.to_period("M")
             monthly = service_df.groupby("Month")["Service_Cost"].sum()
 
             fig, ax = plt.subplots()
             monthly.plot(kind="bar", ax=ax)
+            ax.set_ylabel("Service Cost ₹")
+            ax.set_xlabel("Month")
             st.pyplot(fig)
+        else:
+            st.info("No service data available.")
+
+        st.divider()
+
+        # =====================
+        # SHOW COMPLETE DATABASE
+        # =====================
+        st.subheader("Complete Database Records")
+
+        # Clean display version (hide internal timestamps if needed)
+        display_df = df_sorted.copy()
+
+        st.dataframe(display_df, use_container_width=True)
 
 # =========================
 # REPORTS
