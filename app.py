@@ -5,211 +5,246 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Amaze Auto Analytics", layout="wide")
 
-st.title("🚗 Amaze Auto Analytics")
-st.markdown("Light Theme | Currency: ₹ INR")
+st.title("🚗 Amaze Auto Analytics System")
+st.markdown("Currency: ₹ INR")
 
-# -----------------------------
-# DATABASE SETUP
-# -----------------------------
+# ==============================
+# DATABASE CONNECTION
+# ==============================
 conn = sqlite3.connect("amaze_auto.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Create Tables
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS services (
+CREATE TABLE IF NOT EXISTS maintenance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT,
-    customer_name TEXT,
-    service_type TEXT,
+    description TEXT,
     amount REAL
 )
 """)
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS fuel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT,
+    litres REAL,
+    amount REAL
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS toll (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT,
+    location TEXT,
+    amount REAL
+)
+""")
+
 conn.commit()
 
-
-# -----------------------------
-# FUNCTIONS
-# -----------------------------
-def load_data():
-    df = pd.read_sql("SELECT * FROM services", conn)
+# ==============================
+# HELPER FUNCTIONS
+# ==============================
+def load_table(table):
+    df = pd.read_sql(f"SELECT * FROM {table}", conn)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
     return df
 
-
-def insert_data(date, name, service, amount):
-    cursor.execute(
-        "INSERT INTO services (date, customer_name, service_type, amount) VALUES (?, ?, ?, ?)",
-        (date, name, service, amount),
-    )
+def delete_row(table, id):
+    cursor.execute(f"DELETE FROM {table} WHERE id=?", (id,))
     conn.commit()
 
-
-def update_data(id, date, name, service, amount):
-    cursor.execute(
-        "UPDATE services SET date=?, customer_name=?, service_type=?, amount=? WHERE id=?",
-        (date, name, service, amount, id),
-    )
+def update_row(table, id, values):
+    if table == "maintenance":
+        cursor.execute("UPDATE maintenance SET date=?, description=?, amount=? WHERE id=?",
+                       (*values, id))
+    elif table == "fuel":
+        cursor.execute("UPDATE fuel SET date=?, litres=?, amount=? WHERE id=?",
+                       (*values, id))
+    elif table == "toll":
+        cursor.execute("UPDATE toll SET date=?, location=?, amount=? WHERE id=?",
+                       (*values, id))
     conn.commit()
 
+# ==============================
+# SIDEBAR NAVIGATION
+# ==============================
+menu = st.sidebar.radio("Navigation", 
+                        ["Dashboard", "Maintenance", "Fuel", "Toll", "Reports"])
 
-def delete_data(id):
-    cursor.execute("DELETE FROM services WHERE id=?", (id,))
-    conn.commit()
+# ==============================
+# MAINTENANCE PAGE
+# ==============================
+if menu == "Maintenance":
 
+    st.header("🔧 Maintenance Entry")
 
-def replace_database(df):
-    cursor.execute("DELETE FROM services")
-    conn.commit()
-    df.to_sql("services", conn, if_exists="append", index=False)
+    with st.form("maint_form"):
+        date = st.date_input("Date", datetime.today())
+        desc = st.text_input("Description")
+        amount = st.number_input("Amount (₹)", min_value=0.0)
+        submit = st.form_submit_button("Add")
 
+        if submit:
+            cursor.execute("INSERT INTO maintenance (date, description, amount) VALUES (?, ?, ?)",
+                           (str(date), desc, amount))
+            conn.commit()
+            st.success("Maintenance entry added")
 
-# -----------------------------
-# CSV UPLOAD
-# -----------------------------
-st.header("📂 Upload CSV")
+    df = load_table("maintenance")
 
-uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+    if not df.empty:
+        st.dataframe(df)
 
-if uploaded_file is not None:
-    df_upload = pd.read_csv(uploaded_file)
+        selected = st.selectbox("Select ID to Edit/Delete", df["id"])
+        row = df[df["id"] == selected].iloc[0]
 
-    df_upload.columns = [col.lower().replace(" ", "_") for col in df_upload.columns]
+        col1, col2 = st.columns(2)
 
-    if st.button("Replace Entire Database"):
-        replace_database(df_upload)
-        st.success("Database replaced successfully!")
+        if col1.button("Delete"):
+            delete_row("maintenance", selected)
+            st.success("Deleted")
 
-    if st.button("Append to Existing Database"):
-        df_upload.to_sql("services", conn, if_exists="append", index=False)
-        st.success("Data appended successfully!")
+        if col2.button("Load for Edit"):
+            with st.form("edit_maint"):
+                edate = st.date_input("Edit Date", row["date"])
+                edesc = st.text_input("Edit Description", row["description"])
+                eamount = st.number_input("Edit Amount", value=float(row["amount"]))
+                update = st.form_submit_button("Update")
 
+                if update:
+                    update_row("maintenance", selected,
+                               (str(edate), edesc, eamount))
+                    st.success("Updated")
 
-# -----------------------------
-# ADD ENTRY
-# -----------------------------
-st.header("➕ Add New Entry")
+# ==============================
+# FUEL PAGE
+# ==============================
+elif menu == "Fuel":
 
-with st.form("add_form"):
-    date = st.date_input("Date", datetime.today())
-    name = st.text_input("Customer Name")
-    service = st.text_input("Service Type")
-    amount = st.number_input("Amount (INR)", min_value=0.0)
+    st.header("⛽ Fuel Entry")
 
-    submitted = st.form_submit_button("Add Entry")
+    with st.form("fuel_form"):
+        date = st.date_input("Date", datetime.today())
+        litres = st.number_input("Litres", min_value=0.0)
+        amount = st.number_input("Amount (₹)", min_value=0.0)
+        submit = st.form_submit_button("Add")
 
-    if submitted:
-        insert_data(str(date), name, service, amount)
-        st.success("Entry added successfully!")
+        if submit:
+            cursor.execute("INSERT INTO fuel (date, litres, amount) VALUES (?, ?, ?)",
+                           (str(date), litres, amount))
+            conn.commit()
+            st.success("Fuel entry added")
 
+    df = load_table("fuel")
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
-df = load_data()
+    if not df.empty:
+        st.dataframe(df)
 
-# -----------------------------
-# DASHBOARD SUMMARY
-# -----------------------------
-st.header("📊 Dashboard Summary")
+        selected = st.selectbox("Select ID", df["id"])
+        row = df[df["id"] == selected].iloc[0]
 
-if not df.empty:
-    total_revenue = df["amount"].sum()
-    total_jobs = len(df)
-    avg_invoice = df["amount"].mean()
+        if st.button("Delete Fuel"):
+            delete_row("fuel", selected)
+            st.success("Deleted")
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Revenue", f"₹ {total_revenue:,.2f}")
-    col2.metric("Total Jobs", total_jobs)
-    col3.metric("Average Invoice", f"₹ {avg_invoice:,.2f}")
+# ==============================
+# TOLL PAGE
+# ==============================
+elif menu == "Toll":
 
-    # Monthly Revenue
-    df["month"] = df["date"].dt.to_period("M")
-    monthly = df.groupby("month")["amount"].sum().reset_index()
+    st.header("🛣 Toll Entry")
 
-    st.subheader("📅 Monthly Revenue")
-    st.line_chart(monthly.set_index("month"))
+    with st.form("toll_form"):
+        date = st.date_input("Date", datetime.today())
+        location = st.text_input("Location")
+        amount = st.number_input("Amount (₹)", min_value=0.0)
+        submit = st.form_submit_button("Add")
 
-    # Service Wise Revenue
-    st.subheader("🔧 Service-wise Revenue")
-    service_rev = df.groupby("service_type")["amount"].sum().reset_index()
-    st.bar_chart(service_rev.set_index("service_type"))
+        if submit:
+            cursor.execute("INSERT INTO toll (date, location, amount) VALUES (?, ?, ?)",
+                           (str(date), location, amount))
+            conn.commit()
+            st.success("Toll entry added")
 
-    # Service Wise Monthly Trend
-    st.subheader("📈 Service-wise Monthly Trend")
-    pivot = df.pivot_table(
-        index="month",
-        columns="service_type",
-        values="amount",
-        aggfunc="sum",
-    ).fillna(0)
-    st.line_chart(pivot)
+    df = load_table("toll")
 
-else:
-    st.info("No data available.")
+    if not df.empty:
+        st.dataframe(df)
 
+        selected = st.selectbox("Select ID", df["id"])
+        if st.button("Delete Toll"):
+            delete_row("toll", selected)
+            st.success("Deleted")
 
-# -----------------------------
-# DATE RANGE REPORT (Max 1 Year)
-# -----------------------------
-st.header("📅 Generate Report Between Dates")
+# ==============================
+# DASHBOARD
+# ==============================
+elif menu == "Dashboard":
 
-if not df.empty:
-    start_date = st.date_input("Start Date")
-    end_date = st.date_input("End Date")
+    st.header("📊 Financial Dashboard")
 
-    if end_date >= start_date and (end_date - start_date) <= timedelta(days=365):
-        filtered = df[
-            (df["date"] >= pd.to_datetime(start_date))
-            & (df["date"] <= pd.to_datetime(end_date))
+    maint = load_table("maintenance")
+    fuel = load_table("fuel")
+    toll = load_table("toll")
+
+    total = 0
+    if not maint.empty:
+        total += maint["amount"].sum()
+    if not fuel.empty:
+        total += fuel["amount"].sum()
+    if not toll.empty:
+        total += toll["amount"].sum()
+
+    st.metric("Total Expense", f"₹ {total:,.2f}")
+
+    # Monthly combined chart
+    combined = pd.concat([
+        maint[["date", "amount"]],
+        fuel[["date", "amount"]],
+        toll[["date", "amount"]],
+    ])
+
+    if not combined.empty:
+        combined["month"] = combined["date"].dt.to_period("M")
+        monthly = combined.groupby("month")["amount"].sum()
+        st.line_chart(monthly)
+
+# ==============================
+# REPORTS
+# ==============================
+elif menu == "Reports":
+
+    st.header("📅 Custom Report (Max 1 Year)")
+
+    start = st.date_input("Start Date")
+    end = st.date_input("End Date")
+
+    if end >= start and (end - start) <= timedelta(days=365):
+
+        maint = load_table("maintenance")
+        fuel = load_table("fuel")
+        toll = load_table("toll")
+
+        combined = pd.concat([
+            maint.assign(type="Maintenance"),
+            fuel.assign(type="Fuel"),
+            toll.assign(type="Toll")
+        ])
+
+        filtered = combined[
+            (combined["date"] >= pd.to_datetime(start)) &
+            (combined["date"] <= pd.to_datetime(end))
         ]
 
         st.dataframe(filtered)
 
         if not filtered.empty:
             csv = filtered.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download Report CSV",
-                csv,
-                "custom_report.csv",
-                "text/csv",
-            )
+            st.download_button("Download Report", csv, "report.csv")
+
     else:
-        st.warning("Select valid date range (max 1 year).")
-
-
-# -----------------------------
-# EDIT / DELETE
-# -----------------------------
-st.header("✏ Edit or Delete Entry")
-
-if not df.empty:
-    selected_id = st.selectbox("Select Entry ID", df["id"])
-
-    selected_row = df[df["id"] == selected_id].iloc[0]
-
-    with st.form("edit_form"):
-        edit_date = st.date_input("Edit Date", selected_row["date"])
-        edit_name = st.text_input("Edit Customer Name", selected_row["customer_name"])
-        edit_service = st.text_input("Edit Service Type", selected_row["service_type"])
-        edit_amount = st.number_input(
-            "Edit Amount (INR)", value=float(selected_row["amount"])
-        )
-
-        col1, col2 = st.columns(2)
-
-        update_btn = col1.form_submit_button("Update")
-        delete_btn = col2.form_submit_button("Delete")
-
-        if update_btn:
-            update_data(
-                selected_id,
-                str(edit_date),
-                edit_name,
-                edit_service,
-                edit_amount,
-            )
-            st.success("Entry updated successfully!")
-
-        if delete_btn:
-            delete_data(selected_id)
-            st.success("Entry deleted successfully!")
+        st.warning("Select valid range (max 1 year)")
