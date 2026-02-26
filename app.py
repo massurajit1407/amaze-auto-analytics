@@ -1,227 +1,267 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 import os
+from datetime import datetime
 import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide")
+# =========================
+# CONFIG
+# =========================
+st.set_page_config(page_title="Honda Amaze Tech-Log", layout="wide")
 
-FILE_NAME = "amaze_tech_log.csv"
+DATA_FILE = "amaze_tech_log.csv"
 TANK_CAPACITY = 35.0
+FASTAG_PASS_COST = 3000
 FASTAG_TOTAL_TRIPS = 200
-FASTAG_COST = 3000
+FASTAG_COST_PER_TRIP = FASTAG_PASS_COST / FASTAG_TOTAL_TRIPS
 
-# -----------------------------
-# CSV INITIALIZATION
-# -----------------------------
-if not os.path.exists(FILE_NAME):
-    df_init = pd.DataFrame(columns=[
-        "Entry_ID",
-        "Date",
-        "Drive_Profile",
-        "AC_Mode",
-        "Liters_Added",
-        "Cost_per_Liter",
-        "Full_Tank",
-        "Odometer",
-        "State_Toll",
-        "Private_Toll",
-        "Service_Cost",
-        "Service_Desc",
-        "Timestamp_Created",
-        "Timestamp_Edited"
-    ])
-    df_init.to_csv(FILE_NAME, index=False)
+# =========================
+# LOAD DATABASE
+# =========================
+def load_data():
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
 
-df = pd.read_csv(FILE_NAME)
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(
+                df["Date"],
+                errors="coerce",
+                dayfirst=True
+            )
+            df = df.dropna(subset=["Date"])
 
-if not df.empty:
-    if "Date" in df.columns:
-    df["Date"] = pd.to_datetime(
-        df["Date"],
-        errors="coerce",
-        dayfirst=True
-    )
-    df = df.dropna(subset=["Date"])
+        return df
+    else:
+        return pd.DataFrame()
 
-# -----------------------------
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
+
+df = load_data()
+
+# =========================
 # SIDEBAR NAVIGATION
-# -----------------------------
-menu = st.sidebar.radio("Navigation", [
-    "Fuel Entry",
-    "Transit & Maintenance",
-    "Dashboard",
-    "Reports"
-])
+# =========================
+menu = st.sidebar.selectbox(
+    "Navigation",
+    [
+        "Fuel Entry",
+        "FASTag / Toll Entry",
+        "Maintenance Entry",
+        "Dashboard",
+        "Reports",
+        "Database Tools"
+    ]
+)
 
-# -----------------------------
-# HELPER FUNCTIONS
-# -----------------------------
-def save_df():
-    df.to_csv(FILE_NAME, index=False)
-
-def calculate_efficiency():
-    if df.empty:
-        return 15  # default initial estimate
-    
-    full_tanks = df[df["Full_Tank"] == True]
-    if len(full_tanks) < 2:
-        return 15
-    
-    efficiencies = []
-    for i in range(1, len(full_tanks)):
-        prev = full_tanks.iloc[i-1]
-        curr = full_tanks.iloc[i]
-        distance = curr["Odometer"] - prev["Odometer"]
-        fuel = curr["Liters_Added"]
-        if fuel > 0:
-            efficiencies.append(distance / fuel)
-    if efficiencies:
-        return np.mean(efficiencies)
-    return 15
-
-def current_fuel_level():
-    if df.empty:
-        return 0
-    
-    last_full_index = df[df["Full_Tank"] == True].last_valid_index()
-    if last_full_index is None:
-        return 0
-    
-    fuel = TANK_CAPACITY
-    for i in range(last_full_index+1, len(df)):
-        row = df.iloc[i]
-        fuel += row["Liters_Added"]
-        distance = row["Odometer"] - df.iloc[i-1]["Odometer"]
-        eff = calculate_efficiency()
-        fuel -= distance / eff
-    
-    return max(0, min(TANK_CAPACITY, fuel))
-
-# -----------------------------
-# FUEL ENTRY PAGE
-# -----------------------------
+# =========================
+# FUEL ENTRY
+# =========================
 if menu == "Fuel Entry":
 
-    st.header("⛽ Fuel Log Entry")
+    st.header("Fuel Log Entry")
 
     with st.form("fuel_form"):
         date = st.date_input("Date")
-        profile = st.selectbox("Drive Profile", ["City", "Highway"])
-        ac = st.selectbox("AC Usage", ["Mostly AC", "Mixed", "No AC"])
-        liters = st.number_input("Liters Added", min_value=0.0, format="%.2f")
-        cost = st.number_input("Cost per Liter", min_value=0.0, format="%.2f")
-        full = st.checkbox("Full Tank (Autocut)")
-        odo = st.number_input("Current Odometer", min_value=0)
-        submit = st.form_submit_button("Save Entry")
+        drive_profile = st.selectbox("Drive Profile", ["City", "Highway"])
+        ac_usage = st.selectbox("AC Usage", ["Mostly AC", "Mixed", "No AC"])
 
-        if submit:
-            if not df.empty and odo <= df["Odometer"].max():
-                st.error("Odometer must be greater than previous entry.")
-            else:
-                new_entry = {
-                    "Entry_ID": len(df)+1,
-                    "Date": date,
-                    "Drive_Profile": profile,
-                    "AC_Mode": ac,
-                    "Liters_Added": liters,
-                    "Cost_per_Liter": cost,
-                    "Full_Tank": full,
-                    "Odometer": odo,
-                    "State_Toll": 0,
-                    "Private_Toll": 0,
-                    "Service_Cost": 0,
-                    "Service_Desc": "",
-                    "Timestamp_Created": datetime.now(),
-                    "Timestamp_Edited": ""
-                }
-                df.loc[len(df)] = new_entry
-                save_df()
-                st.success("Entry Saved Successfully")
+        liters = st.number_input("Liters Added", min_value=0.0, step=0.01)
+        cost_per_liter = st.number_input("Cost per Liter (₹)", min_value=0.0, step=0.01)
+        full_tank = st.selectbox("Full Tank?", ["No", "Yes"])
+        odometer = st.number_input("Current Odometer", min_value=0)
 
-# -----------------------------
-# TRANSIT & MAINTENANCE
-# -----------------------------
-elif menu == "Transit & Maintenance":
+        submitted = st.form_submit_button("Save Entry")
 
-    st.header("🛣 Transit & Maintenance")
+    if submitted:
+        total_cost = liters * cost_per_liter
+        timestamp_created = datetime.now()
 
-    if not df.empty:
-        selected = st.selectbox("Select Entry ID", df["Entry_ID"])
-        row_index = df[df["Entry_ID"] == selected].index[0]
+        new_row = {
+            "Date": date,
+            "Type": "Fuel",
+            "Drive_Profile": drive_profile,
+            "AC_Usage": ac_usage,
+            "Liters": liters,
+            "Cost_per_Liter": cost_per_liter,
+            "Fuel_Cost": total_cost,
+            "Full_Tank": full_tank,
+            "Odometer": odometer,
+            "FASTag_Trips": 0,
+            "State_Toll": 0,
+            "Private_Toll": 0,
+            "Service_Cost": 0,
+            "Service_Description": "",
+            "Timestamp_Created": timestamp_created,
+            "Timestamp_Edited": ""
+        }
 
-        with st.form("update_form"):
-            state_toll = st.number_input("State Toll", min_value=0.0, format="%.2f")
-            private_toll = st.number_input("Private Toll", min_value=0.0, format="%.2f")
-            service_cost = st.number_input("Service Cost", min_value=0.0, format="%.2f")
-            service_desc = st.text_input("Service Description")
-            update = st.form_submit_button("Update Entry")
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        save_data(df)
+        st.success("Fuel entry saved successfully!")
 
-            if update:
-                df.at[row_index, "State_Toll"] = state_toll
-                df.at[row_index, "Private_Toll"] = private_toll
-                df.at[row_index, "Service_Cost"] = service_cost
-                df.at[row_index, "Service_Desc"] = service_desc
-                df.at[row_index, "Timestamp_Edited"] = datetime.now()
-                save_df()
-                st.success("Updated Successfully")
+# =========================
+# FASTAG / TOLL ENTRY
+# =========================
+elif menu == "FASTag / Toll Entry":
 
-# -----------------------------
+    st.header("FASTag / Toll Entry")
+
+    with st.form("toll_form"):
+        date = st.date_input("Date")
+        fastag_trip = st.number_input("NHAI Trips Used", min_value=0)
+        state_toll = st.number_input("State Toll ₹", min_value=0.0, step=0.01)
+        private_toll = st.number_input("Private Toll ₹", min_value=0.0, step=0.01)
+
+        submitted = st.form_submit_button("Save Toll Entry")
+
+    if submitted:
+        total_fastag_cost = fastag_trip * FASTAG_COST_PER_TRIP
+        timestamp_created = datetime.now()
+
+        new_row = {
+            "Date": date,
+            "Type": "Toll",
+            "Drive_Profile": "",
+            "AC_Usage": "",
+            "Liters": 0,
+            "Cost_per_Liter": 0,
+            "Fuel_Cost": 0,
+            "Full_Tank": "",
+            "Odometer": 0,
+            "FASTag_Trips": fastag_trip,
+            "State_Toll": state_toll,
+            "Private_Toll": private_toll,
+            "Service_Cost": 0,
+            "Service_Description": "",
+            "Timestamp_Created": timestamp_created,
+            "Timestamp_Edited": ""
+        }
+
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        save_data(df)
+        st.success("Toll entry saved!")
+
+# =========================
+# MAINTENANCE ENTRY
+# =========================
+elif menu == "Maintenance Entry":
+
+    st.header("Maintenance Entry")
+
+    with st.form("service_form"):
+        date = st.date_input("Date")
+        description = st.text_input("Service Description")
+        cost = st.number_input("Service Cost ₹", min_value=0.0, step=0.01)
+
+        submitted = st.form_submit_button("Save Maintenance Entry")
+
+    if submitted:
+        timestamp_created = datetime.now()
+
+        new_row = {
+            "Date": date,
+            "Type": "Service",
+            "Drive_Profile": "",
+            "AC_Usage": "",
+            "Liters": 0,
+            "Cost_per_Liter": 0,
+            "Fuel_Cost": 0,
+            "Full_Tank": "",
+            "Odometer": 0,
+            "FASTag_Trips": 0,
+            "State_Toll": 0,
+            "Private_Toll": 0,
+            "Service_Cost": cost,
+            "Service_Description": description,
+            "Timestamp_Created": timestamp_created,
+            "Timestamp_Edited": ""
+        }
+
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        save_data(df)
+        st.success("Maintenance entry saved!")
+
+# =========================
 # DASHBOARD
-# -----------------------------
+# =========================
 elif menu == "Dashboard":
 
-    st.header("📊 Fuel & Financial Dashboard")
+    st.header("Amaze Financial Dashboard")
 
-    if not df.empty:
+    if df.empty:
+        st.warning("No data available.")
+    else:
+        total_fuel = df["Fuel_Cost"].sum()
+        total_service = df["Service_Cost"].sum()
+        total_toll = df["State_Toll"].sum() + df["Private_Toll"].sum()
+        total_fastag = df["FASTag_Trips"].sum() * FASTAG_COST_PER_TRIP
 
-        efficiency = calculate_efficiency()
-        fuel_level = current_fuel_level()
-        dte = fuel_level * efficiency
+        total_cost = total_fuel + total_service + total_toll + total_fastag
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Average Mileage (KM/L)", f"{efficiency:.2f}")
-        col2.metric("Fuel Remaining (L)", f"{fuel_level:.2f}")
-        col3.metric("Distance To Empty (KM)", f"{dte:.0f}")
+        col1.metric("Total Fuel ₹", round(total_fuel, 2))
+        col2.metric("Total Service ₹", round(total_service, 2))
+        col3.metric("Total Toll ₹", round(total_toll + total_fastag, 2))
 
-        # Fuel Bars
-        bars = int((fuel_level / TANK_CAPACITY) * 10)
-        st.write("Fuel Level:", "🟩"*bars + "⬜"*(10-bars))
+        st.subheader("Monthly Service Trend")
 
-        # Cost Per KM
-        total_distance = df["Odometer"].max() - df["Odometer"].min()
-        total_fuel_cost = (df["Liters_Added"] * df["Cost_per_Liter"]).sum()
-        total_toll = df["State_Toll"].sum() + df["Private_Toll"].sum()
-        total_service = df["Service_Cost"].sum()
+        service_df = df[df["Type"] == "Service"]
+        if not service_df.empty:
+            service_df["Month"] = service_df["Date"].dt.to_period("M")
+            monthly = service_df.groupby("Month")["Service_Cost"].sum()
 
-        fastag_used = len(df[df["State_Toll"] > 0])
-        fastag_amortized = (fastag_used / FASTAG_TOTAL_TRIPS) * FASTAG_COST
+            fig, ax = plt.subplots()
+            monthly.plot(kind="bar", ax=ax)
+            st.pyplot(fig)
 
-        total_cost = total_fuel_cost + total_toll + total_service + fastag_amortized
-
-        if total_distance > 0:
-            cpk = total_cost / total_distance
-            st.metric("Total Cost Per KM", f"₹ {cpk:.2f}")
-
-# -----------------------------
+# =========================
 # REPORTS
-# -----------------------------
+# =========================
 elif menu == "Reports":
 
-    st.header("📅 Custom Date Report (Max 1 Year)")
+    st.header("Date Range Report")
 
-    if not df.empty:
-        start = st.date_input("Start Date")
-        end = st.date_input("End Date")
+    if df.empty:
+        st.warning("No data available.")
+    else:
+        start_date = st.date_input("Start Date")
+        end_date = st.date_input("End Date")
 
-        if end >= start and (end - start) <= timedelta(days=365):
-            filtered = df[(df["Date"] >= pd.to_datetime(start)) &
-                          (df["Date"] <= pd.to_datetime(end))]
-            st.dataframe(filtered)
+        if start_date <= end_date:
+            mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
+            report_df = df.loc[mask]
 
-            if not filtered.empty:
-                csv = filtered.to_csv(index=False).encode("utf-8")
-                st.download_button("Download CSV", csv, "custom_report.csv")
-        else:
-            st.warning("Select valid date range (max 1 year)")
+            st.dataframe(report_df)
+
+            total_cost = (
+                report_df["Fuel_Cost"].sum() +
+                report_df["Service_Cost"].sum() +
+                report_df["State_Toll"].sum() +
+                report_df["Private_Toll"].sum() +
+                report_df["FASTag_Trips"].sum() * FASTAG_COST_PER_TRIP
+            )
+
+            st.metric("Total Cost in Period ₹", round(total_cost, 2))
+
+# =========================
+# DATABASE TOOLS
+# =========================
+elif menu == "Database Tools":
+
+    st.header("Database Tools")
+
+    uploaded_file = st.file_uploader("Upload CSV to Replace Database", type=["csv"])
+
+    if uploaded_file:
+        new_df = pd.read_csv(uploaded_file)
+        save_data(new_df)
+        st.success("Database replaced successfully!")
+        st.experimental_rerun()
+
+    st.download_button(
+        "Download Current Database",
+        df.to_csv(index=False),
+        file_name="amaze_tech_log_backup.csv"
+    )
