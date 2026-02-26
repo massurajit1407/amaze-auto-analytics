@@ -37,7 +37,13 @@ if not os.path.exists(FILE_NAME):
 df = pd.read_csv(FILE_NAME)
 
 if not df.empty:
-    df["Date"] = pd.to_datetime(df["Date"])
+    if "Date" in df.columns:
+    df["Date"] = pd.to_datetime(
+        df["Date"],
+        errors="coerce",
+        dayfirst=True
+    )
+    df = df.dropna(subset=["Date"])
 
 # -----------------------------
 # SIDEBAR NAVIGATION
