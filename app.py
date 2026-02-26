@@ -1,244 +1,215 @@
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
-import matplotlib.pyplot as plt
+import sqlite3
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Amaze Analytics Engine", layout="wide")
+st.set_page_config(page_title="Amaze Auto Analytics", layout="wide")
 
-FILE_NAME = "amaze_tech_log.csv"
-TANK_CAPACITY = 35
+st.title("🚗 Amaze Auto Analytics")
+st.markdown("Light Theme | Currency: ₹ INR")
 
-# -------------------------------------------------
-# INITIALIZE CSV
-# -------------------------------------------------
-if not os.path.exists(FILE_NAME):
-    df_init = pd.DataFrame(columns=[
-        "Entry_ID",
-        "Date",
-        "Drive_Profile",
-        "AC_Usage",
-        "Liters",
-        "Cost_per_Liter",
-        "Full_Tank",
-        "Odometer",
-        "Entry_Type",
-        "Description",
-        "Amount",
-        "Timestamp_Created"
-    ])
-    df_init.to_csv(FILE_NAME, index=False)
+# -----------------------------
+# DATABASE SETUP
+# -----------------------------
+conn = sqlite3.connect("amaze_auto.db", check_same_thread=False)
+cursor = conn.cursor()
 
-df = pd.read_csv(FILE_NAME)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT,
+    customer_name TEXT,
+    service_type TEXT,
+    amount REAL
+)
+""")
+conn.commit()
 
-# Convert date column properly
+
+# -----------------------------
+# FUNCTIONS
+# -----------------------------
+def load_data():
+    df = pd.read_sql("SELECT * FROM services", conn)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def insert_data(date, name, service, amount):
+    cursor.execute(
+        "INSERT INTO services (date, customer_name, service_type, amount) VALUES (?, ?, ?, ?)",
+        (date, name, service, amount),
+    )
+    conn.commit()
+
+
+def update_data(id, date, name, service, amount):
+    cursor.execute(
+        "UPDATE services SET date=?, customer_name=?, service_type=?, amount=? WHERE id=?",
+        (date, name, service, amount, id),
+    )
+    conn.commit()
+
+
+def delete_data(id):
+    cursor.execute("DELETE FROM services WHERE id=?", (id,))
+    conn.commit()
+
+
+def replace_database(df):
+    cursor.execute("DELETE FROM services")
+    conn.commit()
+    df.to_sql("services", conn, if_exists="append", index=False)
+
+
+# -----------------------------
+# CSV UPLOAD
+# -----------------------------
+st.header("📂 Upload CSV")
+
 uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    df_upload = pd.read_csv(uploaded_file)
 
-    # Convert Date column if present
-    if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"])
+    df_upload.columns = [col.lower().replace(" ", "_") for col in df_upload.columns]
 
-    st.success("File uploaded successfully!")
-    st.dataframe(df.head())
+    if st.button("Replace Entire Database"):
+        replace_database(df_upload)
+        st.success("Database replaced successfully!")
 
-# -------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------
-st.sidebar.title("🚗 Amaze Analytics Engine v2.0")
-menu = st.sidebar.radio("Select Module", [
-    "Fuel Log",
-    "Transit",
-    "Maintenance",
-    "Dashboard",
-    "Reports"
-])
+    if st.button("Append to Existing Database"):
+        df_upload.to_sql("services", conn, if_exists="append", index=False)
+        st.success("Data appended successfully!")
 
-# =====================================================
-# FUEL LOG
-# =====================================================
-if menu == "Fuel Log":
 
-    st.header("⛽ Fuel Entry")
+# -----------------------------
+# ADD ENTRY
+# -----------------------------
+st.header("➕ Add New Entry")
 
-    with st.form("fuel_form"):
+with st.form("add_form"):
+    date = st.date_input("Date", datetime.today())
+    name = st.text_input("Customer Name")
+    service = st.text_input("Service Type")
+    amount = st.number_input("Amount (INR)", min_value=0.0)
 
-        date = st.date_input("Date")
-        drive_profile = st.selectbox("Drive Profile", ["City", "Highway"])
-        ac_usage = st.selectbox("AC Usage", ["Mostly AC", "Mixed", "No AC"])
-        liters = st.number_input("Liters Added", min_value=0.01, format="%.2f")
-        cost_per_liter = st.number_input("Cost per Liter (₹)", min_value=0.01, format="%.2f")
-        full_tank = st.selectbox("Full Tank (Autocut)?", ["No", "Yes"])
-        odometer = st.number_input("Odometer Reading", min_value=0, step=1)
+    submitted = st.form_submit_button("Add Entry")
 
-        submit = st.form_submit_button("Save")
+    if submitted:
+        insert_data(str(date), name, service, amount)
+        st.success("Entry added successfully!")
 
-        if submit:
 
-            if not df[df["Entry_Type"] == "Fuel"].empty:
-                last_odometer = df[df["Entry_Type"] == "Fuel"]["Odometer"].max()
-                if odometer <= last_odometer:
-                    st.error(f"Odometer must be greater than last entry ({last_odometer} km)")
-                    st.stop()
+# -----------------------------
+# LOAD DATA
+# -----------------------------
+df = load_data()
 
-            entry_id = len(df) + 1
+# -----------------------------
+# DASHBOARD SUMMARY
+# -----------------------------
+st.header("📊 Dashboard Summary")
 
-            new_row = {
-                "Entry_ID": entry_id,
-                "Date": date,
-                "Drive_Profile": drive_profile,
-                "AC_Usage": ac_usage,
-                "Liters": liters,
-                "Cost_per_Liter": cost_per_liter,
-                "Full_Tank": full_tank,
-                "Odometer": odometer,
-                "Entry_Type": "Fuel",
-                "Description": "",
-                "Amount": liters * cost_per_liter,
-                "Timestamp_Created": datetime.now()
-            }
+if not df.empty:
+    total_revenue = df["amount"].sum()
+    total_jobs = len(df)
+    avg_invoice = df["amount"].mean()
 
-            df = pd.concat([df, pd.DataFrame([new_row])])
-            df.to_csv(FILE_NAME, index=False)
-            st.success("Fuel Entry Saved Successfully!")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Revenue", f"₹ {total_revenue:,.2f}")
+    col2.metric("Total Jobs", total_jobs)
+    col3.metric("Average Invoice", f"₹ {avg_invoice:,.2f}")
 
-# =====================================================
-# TRANSIT
-# =====================================================
-elif menu == "Transit":
+    # Monthly Revenue
+    df["month"] = df["date"].dt.to_period("M")
+    monthly = df.groupby("month")["amount"].sum().reset_index()
 
-    st.header("🛣 Transit Entry")
+    st.subheader("📅 Monthly Revenue")
+    st.line_chart(monthly.set_index("month"))
 
-    with st.form("transit_form"):
+    # Service Wise Revenue
+    st.subheader("🔧 Service-wise Revenue")
+    service_rev = df.groupby("service_type")["amount"].sum().reset_index()
+    st.bar_chart(service_rev.set_index("service_type"))
 
-        date = st.date_input("Date")
-        state_toll = st.number_input("State Toll (₹)", min_value=0.0, format="%.2f")
-        private_toll = st.number_input("Private Toll (₹)", min_value=0.0, format="%.2f")
+    # Service Wise Monthly Trend
+    st.subheader("📈 Service-wise Monthly Trend")
+    pivot = df.pivot_table(
+        index="month",
+        columns="service_type",
+        values="amount",
+        aggfunc="sum",
+    ).fillna(0)
+    st.line_chart(pivot)
 
-        submit = st.form_submit_button("Save")
+else:
+    st.info("No data available.")
 
-        if submit:
 
-            entry_id = len(df) + 1
-            total = state_toll + private_toll
+# -----------------------------
+# DATE RANGE REPORT (Max 1 Year)
+# -----------------------------
+st.header("📅 Generate Report Between Dates")
 
-            new_row = {
-                "Entry_ID": entry_id,
-                "Date": date,
-                "Drive_Profile": "",
-                "AC_Usage": "",
-                "Liters": 0,
-                "Cost_per_Liter": 0,
-                "Full_Tank": "",
-                "Odometer": "",
-                "Entry_Type": "Transit",
-                "Description": "Toll",
-                "Amount": total,
-                "Timestamp_Created": datetime.now()
-            }
+if not df.empty:
+    start_date = st.date_input("Start Date")
+    end_date = st.date_input("End Date")
 
-            df = pd.concat([df, pd.DataFrame([new_row])])
-            df.to_csv(FILE_NAME, index=False)
-            st.success("Transit Saved!")
+    if end_date >= start_date and (end_date - start_date) <= timedelta(days=365):
+        filtered = df[
+            (df["date"] >= pd.to_datetime(start_date))
+            & (df["date"] <= pd.to_datetime(end_date))
+        ]
 
-# =====================================================
-# MAINTENANCE
-# =====================================================
-elif menu == "Maintenance":
+        st.dataframe(filtered)
 
-    st.header("🔧 Maintenance Entry")
-
-    with st.form("maint_form"):
-
-        date = st.date_input("Date")
-        desc = st.text_input("Service Description")
-        amount = st.number_input("Cost (₹)", min_value=0.01, format="%.2f")
-
-        submit = st.form_submit_button("Save")
-
-        if submit:
-
-            entry_id = len(df) + 1
-
-            new_row = {
-                "Entry_ID": entry_id,
-                "Date": date,
-                "Drive_Profile": "",
-                "AC_Usage": "",
-                "Liters": 0,
-                "Cost_per_Liter": 0,
-                "Full_Tank": "",
-                "Odometer": "",
-                "Entry_Type": "Maintenance",
-                "Description": desc,
-                "Amount": amount,
-                "Timestamp_Created": datetime.now()
-            }
-
-            df = pd.concat([df, pd.DataFrame([new_row])])
-            df.to_csv(FILE_NAME, index=False)
-            st.success("Maintenance Saved!")
-
-# =====================================================
-# DASHBOARD
-# =====================================================
-elif menu == "Dashboard":
-
-    st.header("📊 All Entries")
-
-    if not df.empty:
-        df_display = df.sort_values(["Date", "Timestamp_Created"])
-        st.dataframe(df_display, use_container_width=True)
+        if not filtered.empty:
+            csv = filtered.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download Report CSV",
+                csv,
+                "custom_report.csv",
+                "text/csv",
+            )
     else:
-        st.info("No data available.")
+        st.warning("Select valid date range (max 1 year).")
 
-# =====================================================
-# REPORTS
-# =====================================================
-elif menu == "Reports":
 
-    st.header("📈 Report Generator")
+# -----------------------------
+# EDIT / DELETE
+# -----------------------------
+st.header("✏ Edit or Delete Entry")
 
-    if df.empty:
-        st.info("No data available.")
-    else:
+if not df.empty:
+    selected_id = st.selectbox("Select Entry ID", df["id"])
 
-        start_date = st.date_input("Start Date")
-        end_date = st.date_input("End Date")
+    selected_row = df[df["id"] == selected_id].iloc[0]
 
-        mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
-        period_df = df.loc[mask]
+    with st.form("edit_form"):
+        edit_date = st.date_input("Edit Date", selected_row["date"])
+        edit_name = st.text_input("Edit Customer Name", selected_row["customer_name"])
+        edit_service = st.text_input("Edit Service Type", selected_row["service_type"])
+        edit_amount = st.number_input(
+            "Edit Amount (INR)", value=float(selected_row["amount"])
+        )
 
-        fuel_df = period_df[period_df["Entry_Type"] == "Fuel"].sort_values("Odometer")
+        col1, col2 = st.columns(2)
 
-        if len(fuel_df) > 1:
-            distance = fuel_df["Odometer"].iloc[-1] - fuel_df["Odometer"].iloc[0]
-            total_liters = fuel_df["Liters"].sum()
-            mileage = distance / total_liters if total_liters > 0 else 0
+        update_btn = col1.form_submit_button("Update")
+        delete_btn = col2.form_submit_button("Delete")
 
-            fuel_cost = fuel_df["Amount"].sum()
-            total_cost = period_df["Amount"].sum()
+        if update_btn:
+            update_data(
+                selected_id,
+                str(edit_date),
+                edit_name,
+                edit_service,
+                edit_amount,
+            )
+            st.success("Entry updated successfully!")
 
-            fuel_cpk = fuel_cost / distance if distance > 0 else 0
-            overall_cpk = total_cost / distance if distance > 0 else 0
-
-            st.metric("Total Distance (KM)", round(distance,2))
-            st.metric("Fuel Consumed (L)", round(total_liters,2))
-            st.metric("Overall Mileage (KM/L)", round(mileage,2))
-            st.metric("Fuel CPK (₹/KM)", round(fuel_cpk,2))
-            st.metric("Overall CPK (₹/KM)", round(overall_cpk,2))
-
-            # Trend graph
-            fuel_df["Distance"] = fuel_df["Odometer"].diff()
-            fuel_df["Mileage"] = fuel_df["Distance"] / fuel_df["Liters"]
-
-            fig, ax = plt.subplots()
-            ax.plot(fuel_df["Mileage"])
-            ax.set_ylabel("KM/L")
-            ax.set_title("Mileage Trend")
-            st.pyplot(fig)
-
-        else:
-            st.warning("Not enough fuel entries in selected period.")
+        if delete_btn:
+            delete_data(selected_id)
+            st.success("Entry deleted successfully!")
